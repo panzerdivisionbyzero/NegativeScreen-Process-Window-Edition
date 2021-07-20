@@ -1,20 +1,22 @@
-// Copyright 2011-2017 Melvyn Laïly
-// https://zerowidthjoiner.net
+﻿//Copyright 2011-2012 Melvyn Laily
+//http://arcanesanctum.net
 
-// This file is part of NegativeScreen.
+//This file is part of NegativeScreen.
 
-// This program is free software: you can redistribute it and/or modify
-// it under the terms of the GNU General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
+//This program is free software: you can redistribute it and/or modify
+//it under the terms of the GNU General Public License as published by
+//the Free Software Foundation, either version 3 of the License, or
+//(at your option) any later version.
 
-// This program is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-// GNU General Public License for more details.
+//This program is distributed in the hope that it will be useful,
+//but WITHOUT ANY WARRANTY; without even the implied warranty of
+//MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//GNU General Public License for more details.
 
-// You should have received a copy of the GNU General Public License
-// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//You should have received a copy of the GNU General Public License
+//along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+//Edited by Zacharia Rudge
 
 using System;
 using System.Collections.Generic;
@@ -22,260 +24,319 @@ using System.Text;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Drawing;
-using System.Collections.Concurrent;
-using System.Linq;
 
 namespace NegativeScreen
 {
 	/// <summary>
-	/// inherits from Form so that hot keys can be bound to its message loop
+	/// inherits from Form so that hot keys can be bound to this "window"...
 	/// </summary>
-	partial class OverlayManager : Form
+	class OverlayManager : Form
 	{
-		private AboutBox aboutForm = new AboutBox();
+		public const int HALT_HOTKEY_ID = 42;//random id =°
+		public const int TOGGLE_HOTKEY_ID = 43;
+		public const int RESET_TIMER_HOTKEY_ID = 44;
+		public const int INCREASE_TIMER_HOTKEY_ID = 45;
+		public const int DECREASE_TIMER_HOTKEY_ID = 46;
+
+		//TODO: maybe I should think about loops and config file...
+		public const int MODE1_HOTKEY_ID = 51;
+		public const int MODE2_HOTKEY_ID = 52;
+		public const int MODE3_HOTKEY_ID = 53;
+		public const int MODE4_HOTKEY_ID = 54;
+		public const int MODE5_HOTKEY_ID = 55;
+		public const int MODE6_HOTKEY_ID = 56;
+		public const int MODE7_HOTKEY_ID = 57;
+		public const int MODE8_HOTKEY_ID = 58;
+		public const int MODE9_HOTKEY_ID = 59;
+		public const int MODE10_HOTKEY_ID = 60;
+
+		private const int DEFAULT_INCREASE_STEP = 10;
+		private const int DEFAULT_SLEEP_TIME = DEFAULT_INCREASE_STEP;
+		private const int PAUSE_SLEEP_TIME = 100;
 
 		/// <summary>
 		/// control whether the main loop is paused or not.
 		/// </summary>
 		private bool mainLoopPaused = false;
 
-		/// <summary>
-		/// allow to exit the main loop
-		/// </summary>
-		private bool exiting = false;
+		private int refreshInterval = DEFAULT_SLEEP_TIME;
 
-		/// <summary>
-		/// store the current color matrix.
-		/// </summary>
-		private float[,] currentMatrix = null;
+		private List<NegativeOverlay> overlays = new List<NegativeOverlay>();
 
-		// /!\ The full screen magnifier seems not to be thread-safe on Windows 8 at least,
-		// so every call after initialization must be done on the same thread.
-		#region Inter-thread color effect calls
+		private bool resolutionHasChanged = false;
 
-		/// <summary>
-		/// allow to execute magnifer api calls on the proper thread.
-		/// </summary>
-		private ScreenColorEffect invokeColorEffect;
-		private bool shouldInvokeColorEffect;
-		private object invokeColorEffectLock = new object();
+		private NotifyIcon notifyIcon;
+		private ContextMenuStrip contextMenu;
 
-		/// <summary>
-		/// Ask for a color effect change to be executed on the proper thread.
-		/// </summary>
-		/// <param name="colorEffect"></param>
-		private void InvokeColorEffect(ScreenColorEffect colorEffect)
+		private struct WINDOWPLACEMENT
 		{
-			lock (invokeColorEffectLock)
-			{
-				invokeColorEffect = colorEffect;
-				SynchronizeMenuItemCheckboxesWithEffect(colorEffect);
-				shouldInvokeColorEffect = true;
-			}
+			public int length;
+			public int flags;
+			public int showCmd;
+			public System.Drawing.Point ptMinPosition;
+			public System.Drawing.Point ptMaxPosition;
+			public System.Drawing.Rectangle rcNormalPosition;
 		}
 
-		/// <summary>
-		/// Execute the specified color effect change, on the proper thread.
-		/// </summary>
-		private void DoMagnifierApiInvoke()
+		public OverlayManager()
 		{
-			lock (invokeColorEffectLock)
+			contextMenu = new System.Windows.Forms.ContextMenuStrip();
+			foreach (var item in Screen.AllScreens)
 			{
-				if (shouldInvokeColorEffect)
+				contextMenu.Items.Add(new ToolStripMenuItem(item.DeviceName, null, (s, e) =>
 				{
-					SafeChangeColorEffect(invokeColorEffect.Matrix);
-				}
-				shouldInvokeColorEffect = false;
+					Initialization();
+				}) { CheckOnClick = true, Checked = false });
 			}
-		}
 
-		#endregion
 
-		private static OverlayManager _Instance;
-		public static OverlayManager Instance
-		{
-			get
+			contextMenu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) =>
 			{
-				Initialize();
-				return _Instance;
+				notifyIcon.Dispose();
+				this.Dispose();
+				Application.Exit();
+			})
+			);
+
+			notifyIcon = new NotifyIcon();
+			notifyIcon.ContextMenuStrip = contextMenu;
+			notifyIcon.Icon = new Icon(this.Icon, 32, 32);
+			notifyIcon.Visible = true;
+
+			if (!NativeMethods.RegisterHotKey(this.Handle, HALT_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.H))
+			{
+				throw new Exception("RegisterHotKey(win+alt+H)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
 			}
-		}
-
-		public static void Initialize()
-		{
-			if (_Instance == null)
+			if (!NativeMethods.RegisterHotKey(this.Handle, TOGGLE_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.N))
 			{
-				_Instance = new OverlayManager();
+				throw new Exception("RegisterHotKey(win+alt+N)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
 			}
-		}
-
-		private OverlayManager()
-		{
-			InitializeComponent();
-			this.Icon = Properties.Resources.Icon;
-			trayIcon.Icon = Properties.Resources.Icon;
-
-			TryRegisterHotKeys();
-
-			toggleInversionToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ToggleKey.ToString();
-			exitToolStripMenuItem.ShortcutKeyDisplayString = Configuration.Current.ExitKey.ToString();
-			InitializeContextMenu();
-
-			currentMatrix = Configuration.Current.InitialColorEffect.Matrix;
-			SynchronizeMenuItemCheckboxesWithEffect(Configuration.Current.InitialColorEffect); // requires the context menu to be initialized
-
-			InitializeControlLoop();
-		}
-
-		public void ShowBalloonTip(int timeout, string title, string message, ToolTipIcon icon)
-		{
-			trayIcon.ShowBalloonTip(timeout, title, message, icon);
-		}
-
-		private void TryRegisterHotKeys()
-		{
-
-			StringBuilder sb = new StringBuilder("Unable to register one or more hot keys:\n");
-			bool success = true;
-			success &= TryRegisterHotKeyAppendError(Configuration.Current.ToggleKey, sb);
-			success &= TryRegisterHotKeyAppendError(Configuration.Current.ExitKey, sb);
-			foreach (var item in Configuration.Current.ColorEffects)
+			if (!NativeMethods.RegisterHotKey(this.Handle, RESET_TIMER_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.Multiply))
 			{
-				if (item.Key != HotKey.Empty)
+				throw new Exception("RegisterHotKey(win+alt+Multiply)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, INCREASE_TIMER_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.Add))
+			{
+				throw new Exception("RegisterHotKey(win+alt+Add)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, DECREASE_TIMER_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.Subtract))
+			{
+				throw new Exception("RegisterHotKey(win+alt+Substract)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE1_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F1))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F1)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE2_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F2))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F2)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE3_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F3))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F3)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE4_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F4))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F4)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE5_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F5))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F5)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE6_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F6))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F6)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE7_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F7))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F7)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE8_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F8))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F8)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE9_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F9))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F9)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+			if (!NativeMethods.RegisterHotKey(this.Handle, MODE10_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.F10))
+			{
+				throw new Exception("RegisterHotKey(win+alt+F10)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+
+			if (!NativeMethods.MagInitialize())
+			{
+				throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+			}
+
+			Microsoft.Win32.SystemEvents.DisplaySettingsChanged += new EventHandler(SystemEvents_DisplaySettingsChanged);
+
+			Initialization();
+		}
+
+		void SystemEvents_DisplaySettingsChanged(object sender, EventArgs e)
+		{
+			Console.WriteLine(DateTime.Now.ToString());
+			//we can't start the loop here, in the event handler, because it seems to block the next events
+			resolutionHasChanged = true;
+		}
+
+		private void Initialization()
+		{
+			foreach (var item in overlays)
+			{
+				item.Dispose();
+			}
+			overlays = new List<NegativeOverlay>();
+			foreach (var item in Screen.AllScreens)
+			{
+				foreach (ToolStripMenuItem menuItem in this.contextMenu.Items)
 				{
-					success &= TryRegisterHotKeyAppendError(item.Key, sb);
-				}
-			}
-			if (!success)
-			{
-				ShowBalloonTip(4000, "Warning", sb.ToString(), ToolTipIcon.Warning);
-			}
-		}
-
-		private bool TryRegisterHotKeyAppendError(HotKey hotkey, StringBuilder appendErrorTo)
-		{
-			if (!TryRegisterHotKey(hotkey, out AlreadyRegisteredHotKeyException ex))
-			{
-				appendErrorTo.AppendFormat(" - \"{0}\" : {1}", ex.HotKey, (ex.InnerException == null ? "" : ex.InnerException.Message));
-				return false;
-			}
-			return true;
-		}
-
-		private void InitializeContextMenu()
-		{
-			foreach (var item in Configuration.Current.ColorEffects)
-			{
-				var menuItem = new ToolStripMenuItem(item.Value.Description)
-				{
-					Tag = item.Value,
-					ShortcutKeyDisplayString = item.Key.ToString()
-				};
-				menuItem.Click += (s, e) =>
-				{
-					var effect = (ScreenColorEffect)((ToolStripMenuItem)s).Tag;
-					InvokeColorEffect(effect);
-				};
-				this.changeModeToolStripMenuItem.DropDownItems.Add(menuItem);
-			}
-		}
-
-		private void InitializeControlLoop()
-		{
-			System.Threading.Thread t = new System.Threading.Thread(ControlLoop);
-			t.SetApartmentState((System.Threading.ApartmentState.STA));
-			t.Start();
-		}
-
-		/// <summary>
-		/// Main loop, in charge of controlling the magnification api.
-		/// </summary>
-		private void ControlLoop()
-		{
-			if (!Configuration.Current.ActiveOnStartup)
-			{
-				mainLoopPaused = true;
-				PauseLoop();
-			}
-			while (!exiting)
-			{
-				if (!NativeMethods.MagInitialize())
-				{
-					throw new Exception("MagInitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-				}
-				try
-				{
-					ToggleColorEffect(fromNormal: true);
-				}
-				catch (CannotChangeColorEffectException)
-				{
-					// Unable to set the color effect, most likely because the Windows Magnifier color inversion was enabled.
-					mainLoopPaused = true;
-				}
-				while (!exiting)
-				{
-					System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
-					DoMagnifierApiInvoke();
-					if (mainLoopPaused)
+					if (menuItem.Text == item.DeviceName && menuItem.Checked)
 					{
-						try
-						{
-							ToggleColorEffect(fromNormal: false);
-						}
-						catch (CannotChangeColorEffectException)
-						{
-							// Ignore the error and enter the pause loop.
-						}
-						if (!NativeMethods.MagUninitialize())
-						{
-							throw new Exception("MagUninitialize()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
-						}
-						PauseLoop();
-						// we need to reinitialize
-						break;
+						overlays.Add(new NegativeOverlay(item));
 					}
 				}
 			}
-			this.Invoke((Action)(() =>
-				{
-					this.Dispose();
-					Application.Exit();
-				}));
+			RefreshLoop(overlays);
 		}
 
-		private void PauseLoop()
+		private void RefreshLoop(List<NegativeOverlay> overlays)
 		{
-			while (mainLoopPaused && !exiting)
+			bool noError = true;
+			while (noError)
 			{
-				System.Threading.Thread.Sleep(Configuration.Current.MainLoopRefreshTime);
-				DoMagnifierApiInvoke();
+				System.Diagnostics.Process vivadoProcess = System.Diagnostics.Process.GetProcessesByName("vivado")[0];
+
+				Console.WriteLine("Vivado visible: " + NativeMethods.IsWindowVisible(vivadoProcess));
+
+				if (NativeMethods.IsZoomed(vivadoProcess.MainWindowHandle) && vivadoProcess.MainWindowHandle != IntPtr.Zero && NativeMethods.IsWindowVisible(vivadoProcess))
+				{
+					mainLoopPaused = false;
+					Console.WriteLine("Vivado is maximized");
+				}
+				else
+				{
+					mainLoopPaused = true;
+					Console.WriteLine("Vivado is not maximized");
+				}
+
+				if (resolutionHasChanged)
+				{
+					resolutionHasChanged = false;
+					//if the screen configuration change, we try to reinitialize all the overlays.
+					//we break the loop. the initialization method is called...
+					break;
+				}
+
+				for (int i = 0; i < overlays.Count; i++)
+				{
+					noError = RefreshOverlay(overlays[i]);
+					if (!noError)
+					{
+						//application is exiting
+						break;
+					}
+				}
+
+				//Process Window messages
+				Application.DoEvents();
+
+				if (this.refreshInterval > 0)
+				{
+					System.Threading.Thread.Sleep(this.refreshInterval);
+				}
+
+				//pause
+				while (mainLoopPaused)
+				{
+					if (NativeMethods.IsZoomed(vivadoProcess.MainWindowHandle) && vivadoProcess.MainWindowHandle != IntPtr.Zero && NativeMethods.IsWindowVisible(vivadoProcess))
+					{
+						mainLoopPaused = false;
+						Console.WriteLine("Vivado is maximized");
+					}
+					else
+					{
+						mainLoopPaused = true;
+						Console.WriteLine("Vivado is not maximized");
+					}
+
+					for (int i = 0; i < overlays.Count; i++)
+					{
+						overlays[i].Visible = false;
+					}
+					System.Threading.Thread.Sleep(PAUSE_SLEEP_TIME);
+					Application.DoEvents();
+					if (!mainLoopPaused)
+					{
+						
+
+
+						for (int i = 0; i < overlays.Count; i++)
+						{
+							overlays[i].Visible = true;
+						}
+					}
+				}
+			}
+			if (noError)
+			{
+				//the loop broke because of a screen resolution change
+				Initialization();
 			}
 		}
 
-		public bool TryRegisterHotKey(HotKey hotkey, out AlreadyRegisteredHotKeyException exception)
+		/// <summary>
+		/// return true on success, false on failure.
+		/// </summary>
+		/// <returns></returns>
+		private bool RefreshOverlay(NegativeOverlay overlay)
 		{
-			bool ok = NativeMethods.RegisterHotKey(this.Handle, hotkey.Id, hotkey.Modifiers, hotkey.Key);
-			if (!ok)
+			try
 			{
-				exception = new AlreadyRegisteredHotKeyException(hotkey, Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+				// Reclaim topmost status. 
+				if (!NativeMethods.SetWindowPos(overlay.Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+			   (int)SetWindowPosFlags.SWP_NOACTIVATE | (int)SetWindowPosFlags.SWP_NOMOVE | (int)SetWindowPosFlags.SWP_NOSIZE))
+				{
+					throw new Exception("SetWindowPos()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+				}
+				// Force redraw.
+				if (!NativeMethods.InvalidateRect(overlay.HwndMag, IntPtr.Zero, true))
+				{
+					throw new Exception("InvalidateRect()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+				}
+				return true;
+			}
+			catch (ObjectDisposedException)
+			{
+				//application is exiting
 				return false;
 			}
-			else
+			catch (Exception)
 			{
-				exception = null;
-				return true;
+				throw;
 			}
 		}
 
 		private void UnregisterHotKeys()
 		{
-			try
-			{
-				NativeMethods.UnregisterHotKey(this.Handle, Configuration.Current.ToggleKey.Id);
-				NativeMethods.UnregisterHotKey(this.Handle, Configuration.Current.ExitKey.Id);
+			NativeMethods.UnregisterHotKey(this.Handle, HALT_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, TOGGLE_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, RESET_TIMER_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, INCREASE_TIMER_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, DECREASE_TIMER_HOTKEY_ID);
 
-			}
-			catch (Exception) { }
+			NativeMethods.UnregisterHotKey(this.Handle, MODE1_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE2_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE3_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE4_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE5_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE6_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE7_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE8_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE9_HOTKEY_ID);
+			NativeMethods.UnregisterHotKey(this.Handle, MODE10_HOTKEY_ID);
 		}
 
 		protected override void WndProc(ref Message m)
@@ -283,24 +344,76 @@ namespace NegativeScreen
 			// Listen for operating system messages.
 			switch (m.Msg)
 			{
-				case (int)WindowMessage.WM_HOTKEY:
-					int HotKeyId = (int)m.WParam;
-					switch (HotKeyId)
+				case (int)WindowMessage.WM_DWMCOMPOSITIONCHANGED:
+					//aero has been enabled/disabled. It causes the magnified control to stop working
+					if (Environment.OSVersion.Version.Major == 6 && Environment.OSVersion.Version.Minor == 0)
 					{
-						case HotKey.ExitKeyId:
-							Exit();
+						//running Vista.
+						//The creation of the magnification Window on this OS seems to change desktop composition,
+						//leading to infinite loop
+					}
+					else
+					{
+						Initialization();
+					}
+					break;
+				case (int)WindowMessage.WM_HOTKEY:
+					switch ((int)m.WParam)
+					{
+						case HALT_HOTKEY_ID:
+							//otherwise, if paused, the application never stops
+							mainLoopPaused = false;
+							notifyIcon.Dispose();
+							this.Dispose();
+							Application.Exit();
 							break;
-						case HotKey.ToggleKeyId:
-							Toggle();
+						case TOGGLE_HOTKEY_ID:
+							this.mainLoopPaused = !mainLoopPaused;
+							break;
+						case RESET_TIMER_HOTKEY_ID:
+							this.refreshInterval = DEFAULT_SLEEP_TIME;
+							break;
+						case INCREASE_TIMER_HOTKEY_ID:
+							this.refreshInterval += DEFAULT_INCREASE_STEP;
+							break;
+						case DECREASE_TIMER_HOTKEY_ID:
+							this.refreshInterval -= DEFAULT_INCREASE_STEP;
+							if (this.refreshInterval < 0)
+							{
+								this.refreshInterval = 0;
+							}
+							break;
+						case MODE1_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.Negative);
+							break;
+						case MODE2_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180);
+							break;
+						case MODE3_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation1);
+							break;
+						case MODE4_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation2);
+							break;
+						case MODE5_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation3);
+							break;
+						case MODE6_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation4);
+							break;
+						case MODE7_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeSepia);
+							break;
+						case MODE8_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeGrayScale);
+							break;
+						case MODE9_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeRed);
+							break;
+						case MODE10_HOTKEY_ID:
+							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.Red);
 							break;
 						default:
-							foreach (var item in Configuration.Current.ColorEffects)
-							{
-								if (item.Key.Id == HotKeyId)
-								{
-									InvokeColorEffect(item.Value);
-								}
-							}
 							break;
 					}
 					break;
@@ -308,179 +421,25 @@ namespace NegativeScreen
 			base.WndProc(ref m);
 		}
 
-		/// <summary>
-		/// Can be called from any thread.
-		/// </summary>
-		public void Exit()
-		{
-			if (!mainLoopPaused)
-			{
-				mainLoopPaused = true;
-			}
-			this.exiting = true;
-		}
-
-		/// <summary>
-		/// Can be called from any thread.
-		/// </summary>
-		public void Toggle()
-		{
-			this.mainLoopPaused = !mainLoopPaused;
-		}
-
-		/// <summary>
-		/// Can be called from any thread.
-		/// </summary>
-		public void Enable()
-		{
-			this.mainLoopPaused = false;
-		}
-
-		/// <summary>
-		/// Can be called from any thread.
-		/// </summary>
-		public void Disable()
-		{
-			this.mainLoopPaused = true;
-		}
-
-		/// <summary>
-		/// Can be called from any thread.
-		/// </summary>
-		/// <returns>Returns true if the effect was found and set, false otherwise.</returns>
-		public bool TrySetColorEffectByName(string colorEffectName)
-		{
-			var effect = Configuration.Current.ColorEffects.Where(x => x.Value.Description == colorEffectName);
-			if (effect.Any())
-			{
-				InvokeColorEffect(effect.First().Value);
-				return true;
-			}
-			else
-			{
-				return false;
-			}
-		}
-
-		private void ToggleColorEffect(bool fromNormal)
-		{
-			if (fromNormal)
-			{
-				if (Configuration.Current.SmoothToggles)
-				{
-					BuiltinMatrices.InterpolateColorEffect(BuiltinMatrices.Identity, currentMatrix);
-				}
-				else
-				{
-					BuiltinMatrices.ChangeColorEffect(currentMatrix);
-				}
-			}
-			else
-			{
-				if (Configuration.Current.SmoothToggles)
-				{
-					BuiltinMatrices.InterpolateColorEffect(currentMatrix, BuiltinMatrices.Identity);
-				}
-				else
-				{
-					BuiltinMatrices.ChangeColorEffect(BuiltinMatrices.Identity);
-				}
-			}
-		}
-
-		/// <summary>
-		/// Check if the magnification api is in a state where a color effect can be applied, then proceed.
-		/// </summary>
-		/// <param name="matrix"></param>
-		private void SafeChangeColorEffect(float[,] matrix)
-		{
-			if (!mainLoopPaused && !exiting)
-			{
-				try
-				{
-					if (Configuration.Current.SmoothTransitions)
-					{
-						BuiltinMatrices.InterpolateColorEffect(currentMatrix, matrix);
-					}
-					else
-					{
-						BuiltinMatrices.ChangeColorEffect(matrix);
-					}
-				}
-				// Ignore ColorEffectChangeException, probably thrown because the Windows Magnifier has its color inversion enabled.
-				catch (CannotChangeColorEffectException)
-				{
-					// But we don't change the current matrix.
-					return;
-				}
-			}
-			currentMatrix = matrix;
-		}
-
 		protected override void Dispose(bool disposing)
 		{
-			if (disposing && (components != null))
-			{
-				components.Dispose();
-				UnregisterHotKeys();
-				NativeMethods.MagUninitialize();
-			}
+			UnregisterHotKeys();
+			NativeMethods.MagUninitialize();
 			base.Dispose(disposing);
 		}
 
-		private void SynchronizeMenuItemCheckboxesWithEffect(ScreenColorEffect effect)
-		{
-			ToolStripMenuItem currentItem = null;
-			foreach (ToolStripMenuItem effectItem in this.changeModeToolStripMenuItem.DropDownItems)
-			{
-				effectItem.Checked = false; // reset all the check boxes
-				var castItem = (ScreenColorEffect)effectItem.Tag;
-				if (castItem.Matrix == effect.Matrix) currentItem = effectItem; // TODO: should implement equality comparison...
-			}
-			if (currentItem != null)
-			{
-				currentItem.Checked = true;
-			}
-		}
+        private void InitializeComponent()
+        {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(OverlayManager));
+            this.SuspendLayout();
+            // 
+            // OverlayManager
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.Name = "OverlayManager";
+            this.ResumeLayout(false);
 
-		#region Event Handlers
-
-		private void OverlayManager_FormClosed(object sender, FormClosedEventArgs e)
-		{
-			Exit();
-		}
-
-		private void toggleInversionToolStripMenuItem_Click(object sender, EventArgs e)
-		{
-			Toggle();
-		}
-
-		private void exitToolStripMenuItem_Click(object sender, EventArgs e)
-		{
-			Exit();
-		}
-
-		private void editConfigurationToolStripMenuItem_Click(object sender, EventArgs e)
-		{
-			Configuration.UserEditCurrentConfiguration();
-		}
-
-		private void trayIcon_MouseClick(object sender, System.Windows.Forms.MouseEventArgs e)
-		{
-			if (e.Button == System.Windows.Forms.MouseButtons.Left)
-			{
-				Toggle();
-			}
-		}
-
-		#endregion
-
-		private void aboutToolStripMenuItem_Click(object sender, EventArgs e)
-		{
-			if (!aboutForm.Visible)
-			{
-				aboutForm.ShowDialog();
-			}
-		}
-	}
+        }
+    }
 }
