@@ -5,6 +5,7 @@
 ***
 
 Mostly built as a personal tool to use while working in Vivado, feel free to use it. Hope it can be of use to someone who isn't me!
+Many thanks to Mlaily the original dev of NegativeScreen for offering the source of the multi-monitor edition of NegativeScreen.
 
 ***
 
