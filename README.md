@@ -4,7 +4,11 @@
 
 ***
 
-## Description
+Mostly built as a personal tool to use while working in Vivado, feel free to use it. Hope it can be of use to someone who isn't me!
+
+***
+
+## Original Description
 
 NegativeScreen's main goal is to support your poor tearful eyes when enjoying the bright white interweb in a dark room.
 This task is joyfully achieved by inverting the colors of your screen.
