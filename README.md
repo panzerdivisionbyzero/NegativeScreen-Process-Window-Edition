@@ -1,6 +1,6 @@
 # NegativeScreen (Vivado Edition) #
 
-##Auto-Detects Vivado and darkens only Vivado!##
+## Auto-Detects Vivado and darkens only Vivado! 
 
 ***
 
