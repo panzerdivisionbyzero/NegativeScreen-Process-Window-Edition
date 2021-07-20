@@ -92,6 +92,7 @@ namespace NegativeScreen
 
 			contextMenu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) =>
 			{
+				mainLoopPaused = false;
 				notifyIcon.Dispose();
 				this.Dispose();
 				Application.Exit();
@@ -270,9 +271,6 @@ namespace NegativeScreen
 					Application.DoEvents();
 					if (!mainLoopPaused)
 					{
-						
-
-
 						for (int i = 0; i < overlays.Count; i++)
 						{
 							overlays[i].Visible = true;
@@ -438,8 +436,14 @@ namespace NegativeScreen
             this.ClientSize = new System.Drawing.Size(284, 261);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "OverlayManager";
+            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.OverlayManager_FormClosed);
             this.ResumeLayout(false);
 
+        }
+
+        private void OverlayManager_FormClosed(object sender, FormClosedEventArgs e)
+        {
+			Application.Exit();
         }
     }
 }

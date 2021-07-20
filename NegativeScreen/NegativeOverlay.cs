@@ -132,5 +132,24 @@ namespace NegativeScreen
 			this.Show();
 		}
 
-	}
+        private void InitializeComponent()
+        {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(NegativeOverlay));
+            this.SuspendLayout();
+            // 
+            // NegativeOverlay
+            // 
+            this.ClientSize = new System.Drawing.Size(284, 261);
+            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
+            this.Name = "NegativeOverlay";
+            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.NegativeOverlay_FormClosed);
+            this.ResumeLayout(false);
+
+        }
+
+        private void NegativeOverlay_FormClosed(object sender, FormClosedEventArgs e)
+        {
+			Application.Exit();
+        }
+    }
 }
