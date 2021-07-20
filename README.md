@@ -1,6 +1,6 @@
-# NegativeScreen #
+# NegativeScreen (Vivado Edition) #
 
-https://zerowidthjoiner.net/negativescreen
+##Auto-Detects Vivado and darkens only Vivado!##
 
 ***
 
