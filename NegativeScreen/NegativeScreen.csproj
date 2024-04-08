@@ -10,7 +10,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>NegativeScreen</RootNamespace>
     <AssemblyName>NegativeScreen</AssemblyName>
-    <TargetFrameworkVersion>v2.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <TargetFrameworkProfile>
     </TargetFrameworkProfile>
     <FileAlignment>512</FileAlignment>
@@ -94,6 +94,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="BuiltinMatrices.cs" />
+    <Compile Include="Configuration.cs" />
+    <Compile Include="ConfigurationParser.cs" />
     <Compile Include="NativeMethods.cs" />
     <Compile Include="NativeStructures.cs" />
     <Compile Include="NegativeOverlay.cs">
@@ -104,6 +106,8 @@
     <Compile Include="OverlayManager.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="WindowRectLimiter.cs" />
+    <Compile Include="WindowsUtils.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Icon.ico">

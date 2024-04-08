@@ -22,6 +22,15 @@ using System.ComponentModel;
 
 namespace NegativeScreen
 {
+	public struct WINDOWPLACEMENT
+	{
+		public int length;
+		public int flags;
+		public int showCmd;
+		public System.Drawing.Point ptMinPosition;
+		public System.Drawing.Point ptMaxPosition;
+		public System.Drawing.Rectangle rcNormalPosition;
+	}
 	//based on http://delphi32.blogspot.com/2010/09/windows-magnification-api-net.html
 
 	/// <summary>
@@ -38,7 +47,7 @@ namespace NegativeScreen
 	/// Magnification matrix
 	/// </summary>
 	[StructLayout(LayoutKind.Sequential)]
-	internal struct Transformation
+	public struct Transformation
 	{
 		public float m00;
 		public float m01;
@@ -63,7 +72,7 @@ namespace NegativeScreen
 	/// Transformation matrix
 	/// </summary>
 	[StructLayout(LayoutKind.Sequential)]
-	internal struct ColorEffect
+	public struct ColorEffect
 	{
 		public float transform00;
 		public float transform01;
@@ -194,7 +203,7 @@ namespace NegativeScreen
 	/// </summary>
 	[System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Naming", "CA1709:IdentifiersShouldBeCasedCorrectly", MessageId = "RECT"), System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1034:NestedTypesShouldNotBeVisible")]
 	[StructLayout(LayoutKind.Sequential)]
-	internal struct RECT
+	public struct RECT
 	{
 		/// <summary>
 		/// Position of left edge
@@ -573,7 +582,7 @@ namespace NegativeScreen
 	/// </summary>
 	[FlagsAttribute]
 	[Description("Layered window flags")]
-	internal enum LayeredWindowAttributeFlags : int
+	public enum LayeredWindowAttributeFlags : int
 	{
 		/// <summary>
 		/// Use key as a transparency color
@@ -853,7 +862,7 @@ namespace NegativeScreen
 	/// The keys that must be pressed in combination with the key specified by the uVirtKey parameter in order to generate the WM_HOTKEY message.
 	/// The fsModifiers parameter can be a combination of the following values.
 	/// </summary>
-	internal enum KeyModifiers : int
+	public enum KeyModifiers : int
 	{
 		NONE = 0,
 		/// <summary>
@@ -881,7 +890,7 @@ namespace NegativeScreen
 	}
 
 	[Flags]
-	internal enum DWMWINDOWATTRIBUTE : int
+	public enum DWMWINDOWATTRIBUTE : int
 	{
 		/// <summary>
 		/// Use with DwmGetWindowAttribute. Discovers whether non-client rendering is enabled.
@@ -958,7 +967,7 @@ namespace NegativeScreen
 		DWMWA_LAST,
 	}
 
-	internal enum DWMNCRENDERINGPOLICY
+	public enum DWMNCRENDERINGPOLICY
 	{
 		/// <summary>
 		/// The non-client rendering area is rendered based on the window style.
@@ -978,7 +987,7 @@ namespace NegativeScreen
 		DWMNCRP_LAST,
 	}
 
-	internal enum DWMFLIP3DWINDOWPOLICY
+	public enum DWMFLIP3DWINDOWPOLICY
 	{
 		/// <summary>
 		///  Use the window's style and visibility settings to determine whether to hide or include the window in Flip3D rendering.

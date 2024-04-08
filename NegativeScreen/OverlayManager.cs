@@ -20,10 +20,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Text;
+using System.Diagnostics;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
-using System.Drawing;
 
 namespace NegativeScreen
 {
@@ -50,60 +49,20 @@ namespace NegativeScreen
 		public const int MODE9_HOTKEY_ID = 59;
 		public const int MODE10_HOTKEY_ID = 60;
 
-		private const int DEFAULT_INCREASE_STEP = 10;
-		private const int DEFAULT_SLEEP_TIME = DEFAULT_INCREASE_STEP;
-		private const int PAUSE_SLEEP_TIME = 100;
-
 		/// <summary>
 		/// control whether the main loop is paused or not.
 		/// </summary>
-		private bool mainLoopPaused = false;
+		private bool _mainLoopPaused = false;
 
-		private int refreshInterval = DEFAULT_SLEEP_TIME;
+		private int _mainLoopRefreshTime = Configuration.Current.MainLoopRefreshTime;
+		private int _mainLoopPauseRefreshTime = Configuration.Current.MainLoopPauseRefreshTime;
+		private NegativeOverlay _overlay;
+		private WindowRectLimiter _windowRectLimiter;
 
-		private List<NegativeOverlay> overlays = new List<NegativeOverlay>();
-
-		private bool resolutionHasChanged = false;
-
-		private NotifyIcon notifyIcon;
-		private ContextMenuStrip contextMenu;
-
-		private struct WINDOWPLACEMENT
-		{
-			public int length;
-			public int flags;
-			public int showCmd;
-			public System.Drawing.Point ptMinPosition;
-			public System.Drawing.Point ptMaxPosition;
-			public System.Drawing.Rectangle rcNormalPosition;
-		}
+		private bool _resolutionHasChanged = false;
 
 		public OverlayManager()
 		{
-			contextMenu = new System.Windows.Forms.ContextMenuStrip();
-			foreach (var item in Screen.AllScreens)
-			{
-				contextMenu.Items.Add(new ToolStripMenuItem(item.DeviceName, null, (s, e) =>
-				{
-					Initialization();
-				}) { CheckOnClick = true, Checked = false });
-			}
-
-
-			contextMenu.Items.Add(new ToolStripMenuItem("Exit", null, (s, e) =>
-			{
-				mainLoopPaused = false;
-				notifyIcon.Dispose();
-				this.Dispose();
-				Application.Exit();
-			})
-			);
-
-			notifyIcon = new NotifyIcon();
-			notifyIcon.ContextMenuStrip = contextMenu;
-			notifyIcon.Icon = new Icon(this.Icon, 32, 32);
-			notifyIcon.Visible = true;
-
 			if (!NativeMethods.RegisterHotKey(this.Handle, HALT_HOTKEY_ID, KeyModifiers.MOD_WIN | KeyModifiers.MOD_ALT, Keys.H))
 			{
 				throw new Exception("RegisterHotKey(win+alt+H)", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
@@ -180,101 +139,95 @@ namespace NegativeScreen
 		{
 			Console.WriteLine(DateTime.Now.ToString());
 			//we can't start the loop here, in the event handler, because it seems to block the next events
-			resolutionHasChanged = true;
+			_resolutionHasChanged = true;
 		}
 
 		private void Initialization()
 		{
-			foreach (var item in overlays)
-			{
-				item.Dispose();
-			}
-			overlays = new List<NegativeOverlay>();
-			foreach (var item in Screen.AllScreens)
-			{
-				foreach (ToolStripMenuItem menuItem in this.contextMenu.Items)
-				{
-					if (menuItem.Text == item.DeviceName && menuItem.Checked)
-					{
-						overlays.Add(new NegativeOverlay(item));
-					}
-				}
-			}
-			RefreshLoop(overlays);
+			_windowRectLimiter = new WindowRectLimiter(Configuration.Current.WindowSidesLimits);
+			_overlay = new NegativeOverlay();
+
+			var startedProcHandle = Configuration.Current.ExecuteProcessFromDefinedPath
+				? Process.Start(Configuration.Current.QualifiedProcessPath, Configuration.Current.ProcessPathParams)
+				: null;
+
+			RefreshLoop(_overlay, startedProcHandle);
 		}
 
-		private void RefreshLoop(List<NegativeOverlay> overlays)
+		private DateTime _firstFailedWindowCheck = DateTime.MaxValue;
+		private double _waitForWindowMs = 100;
+
+		private void RefreshLoop(NegativeOverlay overlay, Process startedProcHandle)
 		{
 			bool noError = true;
 			while (noError)
 			{
-				System.Diagnostics.Process vivadoProcess = System.Diagnostics.Process.GetProcessesByName("vivado")[0];
-
-				Console.WriteLine("Vivado visible: " + NativeMethods.IsWindowVisible(vivadoProcess));
-
-				if (NativeMethods.IsZoomed(vivadoProcess.MainWindowHandle) && vivadoProcess.MainWindowHandle != IntPtr.Zero && NativeMethods.IsWindowVisible(vivadoProcess))
+				if (!TryGetProcessesList(startedProcHandle, Configuration.Current.ProcessName,
+					    Configuration.Current.QualifiedProcessPath, out var processes))
 				{
-					mainLoopPaused = false;
-					Console.WriteLine("Vivado is maximized");
+					if (_firstFailedWindowCheck == DateTime.MaxValue)
+					{
+						Console.WriteLine("waiting for window - start" + processes.Length);
+						_firstFailedWindowCheck = DateTime.Now;
+					}
+					if ((int)(DateTime.Now - _firstFailedWindowCheck).TotalMilliseconds > _waitForWindowMs)
+					{
+						return;
+					}
+					if (this._mainLoopRefreshTime > 0)
+					{
+						Console.WriteLine("waiting for window...");
+						System.Threading.Thread.Sleep(this._mainLoopRefreshTime);
+					}
+
+					continue;
 				}
-				else
-				{
-					mainLoopPaused = true;
-					Console.WriteLine("Vivado is not maximized");
-				}
 
-				if (resolutionHasChanged)
+				_firstFailedWindowCheck = DateTime.MaxValue;
+
+				var mainWindowClassName = Configuration.Current.MainWindowClassName;
+
+				_mainLoopPaused = !TryCalcOverlayRect(processes, mainWindowClassName, out var mainWindowHandle,
+					out var overlayRect);
+
+				overlay.ChangeRect(overlayRect);
+
+				if (_resolutionHasChanged)
 				{
-					resolutionHasChanged = false;
+					_resolutionHasChanged = false;
 					//if the screen configuration change, we try to reinitialize all the overlays.
 					//we break the loop. the initialization method is called...
 					break;
 				}
 
-				for (int i = 0; i < overlays.Count; i++)
+				noError = RefreshOverlay(overlay);
+				if (!noError)
 				{
-					noError = RefreshOverlay(overlays[i]);
-					if (!noError)
-					{
-						//application is exiting
-						break;
-					}
+					//application is exiting
+					break;
 				}
 
 				//Process Window messages
 				Application.DoEvents();
 
-				if (this.refreshInterval > 0)
+				if (this._mainLoopRefreshTime > 0)
 				{
-					System.Threading.Thread.Sleep(this.refreshInterval);
+					System.Threading.Thread.Sleep(this._mainLoopRefreshTime);
 				}
 
 				//pause
-				while (mainLoopPaused)
+				while (_mainLoopPaused)
 				{
-					if (NativeMethods.IsZoomed(vivadoProcess.MainWindowHandle) && vivadoProcess.MainWindowHandle != IntPtr.Zero && NativeMethods.IsWindowVisible(vivadoProcess))
-					{
-						mainLoopPaused = false;
-						Console.WriteLine("Vivado is maximized");
-					}
-					else
-					{
-						mainLoopPaused = true;
-						Console.WriteLine("Vivado is not maximized");
-					}
+					_mainLoopPaused = WindowsUtils.IsWindowMinimized(mainWindowHandle);
+					Console.WriteLine("main window is visible (waiting loop) = " + !_mainLoopPaused);
 
-					for (int i = 0; i < overlays.Count; i++)
-					{
-						overlays[i].Visible = false;
-					}
-					System.Threading.Thread.Sleep(PAUSE_SLEEP_TIME);
+					overlay.Visible = false;
+
+					System.Threading.Thread.Sleep(_mainLoopPauseRefreshTime);
 					Application.DoEvents();
-					if (!mainLoopPaused)
+					if (!_mainLoopPaused)
 					{
-						for (int i = 0; i < overlays.Count; i++)
-						{
-							overlays[i].Visible = true;
-						}
+						overlay.Visible = true;
 					}
 				}
 			}
@@ -283,6 +236,63 @@ namespace NegativeScreen
 				//the loop broke because of a screen resolution change
 				Initialization();
 			}
+		}
+
+		private bool TryGetProcessesList(Process startedProcHandle, string procNameForSearch, string procPathForSearch,
+			out Process[] foundProcesses)
+		{
+			if (Configuration.Current.FindProcessByPathInsteadName)
+			{
+				// no need to search process if it's executed by Negative Screen (stored in startedProcHandle)
+				foundProcesses = Configuration.Current.ExecuteProcessFromDefinedPath
+					? startedProcHandle == null || startedProcHandle.HasExited
+						? new Process[0]
+						: new Process[1] { startedProcHandle }
+					: WindowsUtils.GetProcessesByPath(procPathForSearch);
+			}
+			else
+			{
+				foundProcesses = Process.GetProcessesByName(procNameForSearch);
+			}
+
+			Console.WriteLine("foundProcesses.Length = " + foundProcesses.Length);
+			return foundProcesses.Length > 0;
+		}
+
+		private bool TryCalcOverlayRect(Process[] processes, string mainWindowClassName,
+			out IntPtr mainWindowHandle, out NativeMethods.windowRECT overlayRect)
+		{
+			mainWindowHandle = IntPtr.Zero;
+			NativeMethods.windowRECT mainWindowRect = new NativeMethods.windowRECT();
+			List<IntPtr> childHandles;
+
+			// find process with visible window:
+			// (useful for multi-process apps)
+			foreach (var proc in processes)
+			{
+				Console.WriteLine("procId = " + proc.Id + "; searching for visible main window...");
+				childHandles = WindowsUtils.EnumerateProcessWindowHandles(proc);
+				mainWindowHandle = mainWindowClassName.Length == 0
+					? proc.MainWindowHandle
+					: WindowsUtils.FindWindowOfClass(mainWindowClassName, childHandles);
+
+				if (WindowsUtils.IsWindowVisible(mainWindowHandle, ref mainWindowRect))
+				{
+					Console.WriteLine("procId = " + proc.Id + "; mainWindowHandle = " + mainWindowHandle);
+					break;
+				}
+			}
+			childHandles = WindowsUtils.GetAllChildHandles(mainWindowHandle);
+			Console.WriteLine("main window is visible = " + !_mainLoopPaused);
+
+			Console.WriteLine("mainWindowRect = " + mainWindowRect.left + ", " + mainWindowRect.top + ", " +
+			                  mainWindowRect.right + ", " + mainWindowRect.bottom);
+
+			overlayRect = _windowRectLimiter.LimitRect(mainWindowRect, childHandles);
+			Console.WriteLine("clippedRect = " + overlayRect.left + ", " + overlayRect.top + ", " +
+			                  overlayRect.right + ", " + overlayRect.bottom);
+
+			return !WindowsUtils.IsWindowMinimized(mainWindowHandle);
 		}
 
 		/// <summary>
@@ -310,10 +320,6 @@ namespace NegativeScreen
 			{
 				//application is exiting
 				return false;
-			}
-			catch (Exception)
-			{
-				throw;
 			}
 		}
 
@@ -360,56 +366,55 @@ namespace NegativeScreen
 					{
 						case HALT_HOTKEY_ID:
 							//otherwise, if paused, the application never stops
-							mainLoopPaused = false;
-							notifyIcon.Dispose();
+							_mainLoopPaused = false;
 							this.Dispose();
 							Application.Exit();
 							break;
 						case TOGGLE_HOTKEY_ID:
-							this.mainLoopPaused = !mainLoopPaused;
+							this._mainLoopPaused = !_mainLoopPaused;
 							break;
 						case RESET_TIMER_HOTKEY_ID:
-							this.refreshInterval = DEFAULT_SLEEP_TIME;
+							this._mainLoopRefreshTime = Configuration.Current.MainLoopRefreshTime;
 							break;
 						case INCREASE_TIMER_HOTKEY_ID:
-							this.refreshInterval += DEFAULT_INCREASE_STEP;
+							this._mainLoopRefreshTime += Configuration.Current.MainLoopRefreshTimeIncreaseStep;
 							break;
 						case DECREASE_TIMER_HOTKEY_ID:
-							this.refreshInterval -= DEFAULT_INCREASE_STEP;
-							if (this.refreshInterval < 0)
+							this._mainLoopRefreshTime -= Configuration.Current.MainLoopRefreshTimeIncreaseStep;
+							if (this._mainLoopRefreshTime < 0)
 							{
-								this.refreshInterval = 0;
+								this._mainLoopRefreshTime = 0;
 							}
 							break;
 						case MODE1_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.Negative);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.Negative);
 							break;
 						case MODE2_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeHueShift180);
 							break;
 						case MODE3_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation1);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeHueShift180Variation1);
 							break;
 						case MODE4_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation2);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeHueShift180Variation2);
 							break;
 						case MODE5_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation3);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeHueShift180Variation3);
 							break;
 						case MODE6_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeHueShift180Variation4);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeHueShift180Variation4);
 							break;
 						case MODE7_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeSepia);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeSepia);
 							break;
 						case MODE8_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeGrayScale);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeGrayScale);
 							break;
 						case MODE9_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.NegativeRed);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.NegativeRed);
 							break;
 						case MODE10_HOTKEY_ID:
-							BuiltinMatrices.ChangeColorEffect(overlays, BuiltinMatrices.Red);
+							BuiltinMatrices.ChangeColorEffect(_overlay, BuiltinMatrices.Red);
 							break;
 						default:
 							break;
@@ -423,27 +428,8 @@ namespace NegativeScreen
 		{
 			UnregisterHotKeys();
 			NativeMethods.MagUninitialize();
+
 			base.Dispose(disposing);
 		}
-
-        private void InitializeComponent()
-        {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(OverlayManager));
-            this.SuspendLayout();
-            // 
-            // OverlayManager
-            // 
-            this.ClientSize = new System.Drawing.Size(284, 261);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-            this.Name = "OverlayManager";
-            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.OverlayManager_FormClosed);
-            this.ResumeLayout(false);
-
-        }
-
-        private void OverlayManager_FormClosed(object sender, FormClosedEventArgs e)
-        {
-			Application.Exit();
-        }
-    }
+	}
 }

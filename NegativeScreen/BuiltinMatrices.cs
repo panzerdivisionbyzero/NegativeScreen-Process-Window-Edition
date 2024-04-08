@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Runtime.InteropServices;
 
 namespace NegativeScreen
@@ -158,12 +156,9 @@ namespace NegativeScreen
 			}
 		}
 
-		public static void ChangeColorEffect(IEnumerable<NegativeOverlay> overlays, float[,] matrix)
+		public static void ChangeColorEffect(NegativeOverlay overlay, float[,] matrix)
 		{
-			foreach (var item in overlays)
-			{
-				ChangeColorEffect(item.HwndMag, matrix);
-			}
+			ChangeColorEffect(overlay.HwndMag, matrix);
 		}
 
 		public static float[,] MoreBlue(float[,] colorMatrix)

@@ -21,6 +21,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 
 namespace NegativeScreen
 {
@@ -28,10 +29,49 @@ namespace NegativeScreen
 	/// <summary>
 	/// based on http://delphi32.blogspot.com/2010/09/windows-magnification-api-net.html
 	/// </summary>
-	internal static class NativeMethods
+	public static class NativeMethods
 	{
+		// http://msdn.microsoft.com/en-us/library/ms681944(VS.85).aspx
+		/// <summary>
+		/// Allocates a new console for the calling process.
+		/// </summary>
+		/// <returns>nonzero if the function succeeds; otherwise, zero.</returns>
+		/// <remarks>
+		/// A process can be associated with only one console,
+		/// so the function fails if the calling process already has a console.
+		/// </remarks>
+		[DllImport("kernel32.dll", SetLastError = true)]
+		internal static extern int AllocConsole();
 
+		// http://msdn.microsoft.com/en-us/library/ms683150(VS.85).aspx
+		/// <summary>
+		/// Detaches the calling process from its console.
+		/// </summary>
+		/// <returns>nonzero if the function succeeds; otherwise, zero.</returns>
+		/// <remarks>
+		/// If the calling process is not already attached to a console,
+		/// the error code returned is ERROR_INVALID_PARAMETER (87).
+		/// </remarks>
+		[DllImport("kernel32.dll", SetLastError = true)]
+		internal static extern int FreeConsole();
 		#region "User32.dll"
+		public delegate bool EnumWindowProc(IntPtr hwnd, IntPtr lParam);
+		[DllImport("user32")]
+		[return: MarshalAs(UnmanagedType.Bool)]
+		public static extern bool EnumChildWindows(IntPtr window, EnumWindowProc callback, IntPtr lParam);
+		[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+		public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+		[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+		public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+		[DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+		public static extern int GetWindowTextLength(IntPtr hWnd);
+
+		public delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
+
+		[DllImport("user32.dll")]
+		public static extern bool EnumThreadWindows(int dwThreadId, EnumThreadDelegate lpfn, IntPtr lParam);
 		[DllImport("user32.dll")]
 		[return: MarshalAs(UnmanagedType.Bool)]
 		public static extern bool IsIconic(IntPtr hWnd);
@@ -39,7 +79,15 @@ namespace NegativeScreen
 		public static extern bool IsZoomed(IntPtr hWnd);
 
 		[DllImport("user32.dll")]
+		public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+		[DllImport("user32.dll")]
 		public static extern IntPtr WindowFromPoint(Point lpPoint);
+		[DllImport("user32.dll")]
+		[return: MarshalAs(UnmanagedType.Bool)]
+		public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+		[DllImport("user32.dll", SetLastError = true)]
+		internal static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
 		[StructLayout(LayoutKind.Sequential)]
 		public struct windowRECT
@@ -51,27 +99,7 @@ namespace NegativeScreen
 		}
 
 		[DllImport("user32.dll", SetLastError = true)]
-		static extern bool GetWindowRect(IntPtr hWnd, ref windowRECT Rect);
-
-		public static bool IsWindowVisible(Process process)
-		{
-			windowRECT window = new windowRECT();
-			if (GetWindowRect(process.MainWindowHandle, ref window))
-			{
-				int x = (int)(window.left + ((window.right - window.left) / 2));
-				int y = (int)(window.top + ((window.bottom - window.top) / 2));
-				Point middle = new Point(x, y);
-				int distFromCenter = 250;
-				Console.WriteLine(x + ", " + y + " - " + window.top + ", " + window.left);
-				return (process.MainWindowHandle == WindowFromPoint(middle) 
-					&& process.MainWindowHandle == WindowFromPoint(new Point(middle.X + distFromCenter, middle.Y + distFromCenter))
-					&& process.MainWindowHandle == WindowFromPoint(new Point(middle.X - distFromCenter, middle.Y - distFromCenter))
-					&& process.MainWindowHandle == WindowFromPoint(new Point(middle.X - distFromCenter, middle.Y + distFromCenter))
-					&& process.MainWindowHandle == WindowFromPoint(new Point(middle.X + distFromCenter, middle.Y - distFromCenter))
-					);
-			}
-			return false;
-		}
+		public static extern bool GetWindowRect(IntPtr hWnd, ref windowRECT Rect);
 
 		/// <summary>
 		/// Places the window above all non-topmost windows. The window maintains its topmost position even when it is deactivated.

@@ -23,9 +23,19 @@ namespace NegativeScreen
 {
 	class Program
 	{
+		private static bool _debugMode = false;
 		[STAThread]
 		static void Main(string[] args)
 		{
+			// forces the working directory to be the same as the executable
+			Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory;
+			Configuration.Initialize();
+			_debugMode = Configuration.Current.DebugMode;
+			if (_debugMode)
+			{
+				NativeMethods.AllocConsole();
+			}
+
 			//check whether the current process is running under WoW64 mode
 			if (NativeMethods.IsX86InWow64Mode())
 			{
@@ -54,7 +64,13 @@ To avoid known bugs relative to the used APIs, please instead run the 64 bits co
 			//the magnified window is either partially out of the screen,
 			//or blurry, if the transformation scale is forced to 1.
 			NativeMethods.SetProcessDPIAware();
+
 			OverlayManager manager = new OverlayManager();
+
+			if (_debugMode)
+			{
+				NativeMethods.FreeConsole();
+			}
 		}
 
 		private static bool IsAnotherInstanceAlreadyRunning()
@@ -71,6 +87,5 @@ To avoid known bugs relative to the used APIs, please instead run the 64 bits co
 			}
 			return false;
 		}
-
 	}
 }

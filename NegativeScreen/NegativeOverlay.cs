@@ -17,8 +17,6 @@
 //along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Drawing;
@@ -34,13 +32,12 @@ namespace NegativeScreen
 		/// </summary>
 		public IntPtr HwndMag { get { return hwndMag; } }
 
-		public NegativeOverlay(Screen screen)
-			: base()
+		public NegativeOverlay() : base()
 		{
-
+			var magRect = new RECT(0, 0, 1, 1);
 			this.StartPosition = FormStartPosition.Manual;
-			this.Location = screen.Bounds.Location;
-			this.Size = new Size(screen.Bounds.Width, screen.Bounds.Height);
+			this.Location = new Point(magRect.left, magRect.top);
+			this.Size = new Size(magRect.right - magRect.left, magRect.bottom - magRect.top);
 			this.TopMost = true;
 			this.FormBorderStyle = FormBorderStyle.None;
 			this.WindowState = FormWindowState.Normal;
@@ -70,9 +67,8 @@ namespace NegativeScreen
 				NativeMethods.WC_MAGNIFIER,
 				"MagnifierWindow",
 				(int)WindowStyles.WS_CHILD |
-				/*(int)MagnifierStyle.MS_SHOWMAGNIFIEDCURSOR |*/
 				(int)WindowStyles.WS_VISIBLE,
-				0, 0, screen.Bounds.Width, screen.Bounds.Height,
+				0, 0, Size.Width, Size.Height,
 				this.Handle, IntPtr.Zero, hInst, IntPtr.Zero);
 
 			if (hwndMag == IntPtr.Zero)
@@ -81,9 +77,9 @@ namespace NegativeScreen
 			}
 
 			//initial color transformation: simple negative
-			BuiltinMatrices.ChangeColorEffect(hwndMag, BuiltinMatrices.Negative);
+			BuiltinMatrices.ChangeColorEffect(hwndMag, Configuration.Current.InitialColorEffect.Matrix);
 
-			if (!NativeMethods.MagSetWindowSource(this.hwndMag, new RECT(screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Right, screen.Bounds.Bottom)))
+			if (!NativeMethods.MagSetWindowSource(this.hwndMag, magRect))
 			{
 				throw new Exception("MagSetWindowSource()", Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
 			}
@@ -132,24 +128,32 @@ namespace NegativeScreen
 			this.Show();
 		}
 
-        private void InitializeComponent()
+        public bool ChangeRect(NativeMethods.windowRECT rect)
         {
-            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(NegativeOverlay));
-            this.SuspendLayout();
-            // 
-            // NegativeOverlay
-            // 
-            this.ClientSize = new System.Drawing.Size(284, 261);
-            this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-            this.Name = "NegativeOverlay";
-            this.FormClosed += new System.Windows.Forms.FormClosedEventHandler(this.NegativeOverlay_FormClosed);
-            this.ResumeLayout(false);
+	        if (!NativeMethods.MoveWindow(Handle, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+		            true))
+	        {
+		        Console.WriteLine("failed to move host window");
+		        return false;
+	        }
 
-        }
+	        if (!NativeMethods.MoveWindow(hwndMag, 0, 0, rect.right - rect.left, rect.bottom - rect.top,
+		            true))
+	        {
+		        Console.WriteLine("failed to magnifier window");
+		        return false;
+	        }
 
-        private void NegativeOverlay_FormClosed(object sender, FormClosedEventArgs e)
-        {
-			Application.Exit();
+	        var magRect = new RECT(rect.left, rect.top, rect.right, rect.bottom);
+
+	        // change this.Handle pos
+	        if (!NativeMethods.MagSetWindowSource(this.hwndMag, magRect))
+	        {
+		        throw new Exception("failed to MagSetWindowSource()",
+			        Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error()));
+	        }
+
+	        return true;
         }
-    }
+	}
 }
