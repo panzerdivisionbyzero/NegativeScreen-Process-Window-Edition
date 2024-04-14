@@ -69,7 +69,7 @@ namespace NegativeScreen
 DebugMode=false
 
 # Define process search / run parameters:
-# > Process can be executed by Negative Screen
+# > Process can be executed by NegativeScreen
 # > Process can be searched by given path or name
 # > Searching by path without execution (ExecuteProcessFromDefinedPath=false) may work very slow
 ExecuteProcessFromDefinedPath=true
@@ -542,6 +542,12 @@ Binary (Black and white)=
 
 		[MatchingKey("SmoothToggles")]
 		public bool SmoothToggles { get; protected set; }
+
+		[MatchingKey("WaitForWindowTime", CustomParameter = 100)]
+		public int WaitForWindowTime { get; private set; }
+
+		[MatchingKey("WaitForWindowTimeAfterClosed", CustomParameter = 0)]
+		public int WaitForWindowTimeAfterClosed { get; private set; }
 
 		[MatchingKey("MainLoopRefreshTime", CustomParameter = 10)]
 		public int MainLoopRefreshTime { get; protected set; }

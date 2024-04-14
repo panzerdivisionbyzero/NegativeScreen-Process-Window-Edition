@@ -54,11 +54,14 @@ namespace NegativeScreen
 		/// </summary>
 		private bool _mainLoopPaused = false;
 
+		private int _waitForWindowTimeMs = Configuration.Current.WaitForWindowTime;
+		private int _waitFormWindowTimeAfterClosedMs = Configuration.Current.WaitForWindowTimeAfterClosed;
 		private int _mainLoopRefreshTime = Configuration.Current.MainLoopRefreshTime;
 		private int _mainLoopPauseRefreshTime = Configuration.Current.MainLoopPauseRefreshTime;
 		private NegativeOverlay _overlay;
 		private WindowRectLimiter _windowRectLimiter;
 
+		private DateTime _firstFailedWindowCheck = DateTime.MaxValue;
 		private bool _resolutionHasChanged = false;
 
 		public OverlayManager()
@@ -154,23 +157,24 @@ namespace NegativeScreen
 			RefreshLoop(_overlay, startedProcHandle);
 		}
 
-		private DateTime _firstFailedWindowCheck = DateTime.MaxValue;
-		private double _waitForWindowMs = 100;
-
 		private void RefreshLoop(NegativeOverlay overlay, Process startedProcHandle)
 		{
 			bool noError = true;
+			var currentWaitForWindowTimeMs = _waitForWindowTimeMs;
 			while (noError)
 			{
-				if (!TryGetProcessesList(startedProcHandle, Configuration.Current.ProcessName,
-					    Configuration.Current.QualifiedProcessPath, out var processes))
+				var proc = FindProc(startedProcHandle, Configuration.Current.ProcessName,
+					Configuration.Current.QualifiedProcessPath, Configuration.Current.MainWindowClassName,
+					out var targetWindowRect, out var childHandles);
+
+				if (proc == null)
 				{
 					if (_firstFailedWindowCheck == DateTime.MaxValue)
 					{
-						Console.WriteLine("waiting for window - begin; processes.Length = " + processes.Length);
+						Console.WriteLine("waiting for window - begin");
 						_firstFailedWindowCheck = DateTime.Now;
 					}
-					if ((int)(DateTime.Now - _firstFailedWindowCheck).TotalMilliseconds > _waitForWindowMs)
+					if ((int)(DateTime.Now - _firstFailedWindowCheck).TotalMilliseconds > currentWaitForWindowTimeMs)
 					{
 						return;
 					}
@@ -184,11 +188,13 @@ namespace NegativeScreen
 				}
 
 				_firstFailedWindowCheck = DateTime.MaxValue;
+				currentWaitForWindowTimeMs = _waitFormWindowTimeAfterClosedMs;
 
-				var mainWindowClassName = Configuration.Current.MainWindowClassName;
+				_mainLoopPaused = WindowsUtils.IsWindowMinimized(proc.MainWindowHandle);
 
-				_mainLoopPaused = !TryCalcOverlayRect(processes, mainWindowClassName, out var foundProcess,
-					out var procWindowIsMinimized, out var overlayRect) || procWindowIsMinimized;
+				var overlayRect = _windowRectLimiter.LimitRect(targetWindowRect, childHandles);
+				Console.WriteLine("overlayRect = " + overlayRect.left + ", " + overlayRect.top + ", " +
+				                  overlayRect.right + ", " + overlayRect.bottom);
 
 				overlay.ChangeRect(overlayRect);
 
@@ -218,7 +224,7 @@ namespace NegativeScreen
 				//pause
 				while (_mainLoopPaused)
 				{
-					_mainLoopPaused = WindowsUtils.IsWindowMinimized(foundProcess.MainWindowHandle);
+					_mainLoopPaused = WindowsUtils.IsWindowMinimized(proc.MainWindowHandle);
 					Console.WriteLine("proc main window is visible (waiting loop) = " + !_mainLoopPaused);
 
 					if (!_mainLoopPaused)
@@ -240,13 +246,14 @@ namespace NegativeScreen
 			}
 		}
 
-		private bool TryGetProcessesList(Process startedProcHandle, string procNameForSearch, string procPathForSearch,
-			out Process[] foundProcesses)
+		private Process FindProc(Process startedProcHandle, string procNameForSearch, string procPathForSearch,
+			string mainWindowClassName, out NativeMethods.windowRECT targetWindowRect, out List<IntPtr> childHandles)
 		{
+			Process[] processes;
 			if (Configuration.Current.FindProcessByPathInsteadName)
 			{
 				// no need to search process if it's executed by Negative Screen (stored in startedProcHandle)
-				foundProcesses = Configuration.Current.ExecuteProcessFromDefinedPath
+				processes = Configuration.Current.ExecuteProcessFromDefinedPath
 					? startedProcHandle == null || startedProcHandle.HasExited
 						? new Process[0]
 						: new Process[1] { startedProcHandle }
@@ -254,20 +261,12 @@ namespace NegativeScreen
 			}
 			else
 			{
-				foundProcesses = Process.GetProcessesByName(procNameForSearch);
+				processes = Process.GetProcessesByName(procNameForSearch);
 			}
 
-			Console.WriteLine("foundProcesses.Length = " + foundProcesses.Length);
-			return foundProcesses.Length > 0;
-		}
+			Console.WriteLine("foundProcesses.Length = " + processes.Length);
 
-		private bool TryCalcOverlayRect(Process[] processes, string mainWindowClassName,
-			out Process foundProcess, out bool procWindowIsMinimized, out NativeMethods.windowRECT overlayRect)
-		{
-			foundProcess = null;
-			IntPtr targetWindowHandle = IntPtr.Zero;
-			NativeMethods.windowRECT targetWindowRect = new NativeMethods.windowRECT();
-			List<IntPtr> childHandles;
+			targetWindowRect = new NativeMethods.windowRECT();
 
 			// find process with visible window:
 			// (useful for multi-process apps)
@@ -275,7 +274,7 @@ namespace NegativeScreen
 			{
 				Console.WriteLine("procId = " + proc.Id + "; searching for visible window...");
 				childHandles = WindowsUtils.EnumerateProcessWindowHandles(proc);
-				targetWindowHandle = mainWindowClassName.Length == 0
+				var targetWindowHandle = mainWindowClassName.Length == 0
 					? proc.MainWindowHandle
 					: WindowsUtils.FindWindowOfClass(mainWindowClassName, childHandles);
 
@@ -283,33 +282,17 @@ namespace NegativeScreen
 				    targetWindowRect.right - targetWindowRect.left > 0 &&
 				    targetWindowRect.bottom - targetWindowRect.top > 0)
 				{
-					foundProcess = proc;
 					Console.WriteLine("procId = " + proc.Id + "; procMainWindowHandle = " + proc.MainWindowHandle +
 					                  "; targetWindowHandle = " + targetWindowHandle);
-					break;
+					childHandles = WindowsUtils.GetAllChildHandles(targetWindowHandle);
+					Console.WriteLine("targetWindowRect = " + targetWindowRect.left + ", " + targetWindowRect.top +
+					                  ", " + targetWindowRect.right + ", " + targetWindowRect.bottom);
+					return proc;
 				}
 			}
 
-			if (foundProcess == null)
-			{
-				overlayRect = targetWindowRect;
-				procWindowIsMinimized = false;
-				return false;
-			}
-
-			childHandles = WindowsUtils.GetAllChildHandles(targetWindowHandle);
-			Console.WriteLine("proc main window is visible = " + !_mainLoopPaused);
-
-			Console.WriteLine("targetWindowRect = " + targetWindowRect.left + ", " + targetWindowRect.top + ", " +
-			                  targetWindowRect.right + ", " + targetWindowRect.bottom);
-
-			overlayRect = _windowRectLimiter.LimitRect(targetWindowRect, childHandles);
-			Console.WriteLine("clippedRect = " + overlayRect.left + ", " + overlayRect.top + ", " +
-			                  overlayRect.right + ", " + overlayRect.bottom);
-
-			procWindowIsMinimized = WindowsUtils.IsWindowMinimized(foundProcess.MainWindowHandle);
-
-			return true;
+			childHandles = null;
+			return null;
 		}
 
 		/// <summary>
@@ -320,7 +303,7 @@ namespace NegativeScreen
 		{
 			try
 			{
-				// Reclaim topmost status. 
+				// Reclaim topmost status.
 				if (!NativeMethods.SetWindowPos(overlay.Handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
 			   (int)SetWindowPosFlags.SWP_NOACTIVATE | (int)SetWindowPosFlags.SWP_NOMOVE | (int)SetWindowPosFlags.SWP_NOSIZE))
 				{
