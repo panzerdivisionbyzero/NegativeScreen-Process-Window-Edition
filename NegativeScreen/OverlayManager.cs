@@ -279,9 +279,9 @@ namespace NegativeScreen
 					? proc.MainWindowHandle
 					: WindowsUtils.FindWindowOfClass(mainWindowClassName, childHandles);
 
-				if (NativeMethods.GetWindowRect(targetWindowHandle, ref targetWindowRect) ||
-				    targetWindowRect.right - targetWindowRect.left == 0 ||
-				    targetWindowRect.bottom - targetWindowRect.top == 0)
+				if (NativeMethods.GetWindowRect(targetWindowHandle, ref targetWindowRect) &&
+				    targetWindowRect.right - targetWindowRect.left > 0 &&
+				    targetWindowRect.bottom - targetWindowRect.top > 0)
 				{
 					foundProcess = proc;
 					Console.WriteLine("procId = " + proc.Id + "; procMainWindowHandle = " + proc.MainWindowHandle +
