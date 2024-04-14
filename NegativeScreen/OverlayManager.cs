@@ -167,7 +167,7 @@ namespace NegativeScreen
 				{
 					if (_firstFailedWindowCheck == DateTime.MaxValue)
 					{
-						Console.WriteLine("waiting for window - start" + processes.Length);
+						Console.WriteLine("waiting for window - begin; processes.Length = " + processes.Length);
 						_firstFailedWindowCheck = DateTime.Now;
 					}
 					if ((int)(DateTime.Now - _firstFailedWindowCheck).TotalMilliseconds > _waitForWindowMs)
@@ -187,8 +187,8 @@ namespace NegativeScreen
 
 				var mainWindowClassName = Configuration.Current.MainWindowClassName;
 
-				_mainLoopPaused = !TryCalcOverlayRect(processes, mainWindowClassName, out var mainWindowHandle,
-					out var overlayRect);
+				_mainLoopPaused = !TryCalcOverlayRect(processes, mainWindowClassName, out var foundProcess,
+					out var procWindowIsMinimized, out var overlayRect) || procWindowIsMinimized;
 
 				overlay.ChangeRect(overlayRect);
 
@@ -218,17 +218,19 @@ namespace NegativeScreen
 				//pause
 				while (_mainLoopPaused)
 				{
-					_mainLoopPaused = WindowsUtils.IsWindowMinimized(mainWindowHandle);
-					Console.WriteLine("main window is visible (waiting loop) = " + !_mainLoopPaused);
+					_mainLoopPaused = WindowsUtils.IsWindowMinimized(foundProcess.MainWindowHandle);
+					Console.WriteLine("proc main window is visible (waiting loop) = " + !_mainLoopPaused);
+
+					if (!_mainLoopPaused)
+					{
+						overlay.Visible = true;
+						break;
+					}
 
 					overlay.Visible = false;
 
 					System.Threading.Thread.Sleep(_mainLoopPauseRefreshTime);
 					Application.DoEvents();
-					if (!_mainLoopPaused)
-					{
-						overlay.Visible = true;
-					}
 				}
 			}
 			if (noError)
@@ -260,39 +262,54 @@ namespace NegativeScreen
 		}
 
 		private bool TryCalcOverlayRect(Process[] processes, string mainWindowClassName,
-			out IntPtr mainWindowHandle, out NativeMethods.windowRECT overlayRect)
+			out Process foundProcess, out bool procWindowIsMinimized, out NativeMethods.windowRECT overlayRect)
 		{
-			mainWindowHandle = IntPtr.Zero;
-			NativeMethods.windowRECT mainWindowRect = new NativeMethods.windowRECT();
+			foundProcess = null;
+			IntPtr targetWindowHandle = IntPtr.Zero;
+			NativeMethods.windowRECT targetWindowRect = new NativeMethods.windowRECT();
 			List<IntPtr> childHandles;
 
 			// find process with visible window:
 			// (useful for multi-process apps)
 			foreach (var proc in processes)
 			{
-				Console.WriteLine("procId = " + proc.Id + "; searching for visible main window...");
+				Console.WriteLine("procId = " + proc.Id + "; searching for visible window...");
 				childHandles = WindowsUtils.EnumerateProcessWindowHandles(proc);
-				mainWindowHandle = mainWindowClassName.Length == 0
+				targetWindowHandle = mainWindowClassName.Length == 0
 					? proc.MainWindowHandle
 					: WindowsUtils.FindWindowOfClass(mainWindowClassName, childHandles);
 
-				if (WindowsUtils.IsWindowVisible(mainWindowHandle, ref mainWindowRect))
+				if (NativeMethods.GetWindowRect(targetWindowHandle, ref targetWindowRect) ||
+				    targetWindowRect.right - targetWindowRect.left == 0 ||
+				    targetWindowRect.bottom - targetWindowRect.top == 0)
 				{
-					Console.WriteLine("procId = " + proc.Id + "; mainWindowHandle = " + mainWindowHandle);
+					foundProcess = proc;
+					Console.WriteLine("procId = " + proc.Id + "; procMainWindowHandle = " + proc.MainWindowHandle +
+					                  "; targetWindowHandle = " + targetWindowHandle);
 					break;
 				}
 			}
-			childHandles = WindowsUtils.GetAllChildHandles(mainWindowHandle);
-			Console.WriteLine("main window is visible = " + !_mainLoopPaused);
 
-			Console.WriteLine("mainWindowRect = " + mainWindowRect.left + ", " + mainWindowRect.top + ", " +
-			                  mainWindowRect.right + ", " + mainWindowRect.bottom);
+			if (foundProcess == null)
+			{
+				overlayRect = targetWindowRect;
+				procWindowIsMinimized = false;
+				return false;
+			}
 
-			overlayRect = _windowRectLimiter.LimitRect(mainWindowRect, childHandles);
+			childHandles = WindowsUtils.GetAllChildHandles(targetWindowHandle);
+			Console.WriteLine("proc main window is visible = " + !_mainLoopPaused);
+
+			Console.WriteLine("targetWindowRect = " + targetWindowRect.left + ", " + targetWindowRect.top + ", " +
+			                  targetWindowRect.right + ", " + targetWindowRect.bottom);
+
+			overlayRect = _windowRectLimiter.LimitRect(targetWindowRect, childHandles);
 			Console.WriteLine("clippedRect = " + overlayRect.left + ", " + overlayRect.top + ", " +
 			                  overlayRect.right + ", " + overlayRect.bottom);
 
-			return !WindowsUtils.IsWindowMinimized(mainWindowHandle);
+			procWindowIsMinimized = WindowsUtils.IsWindowMinimized(foundProcess.MainWindowHandle);
+
+			return true;
 		}
 
 		/// <summary>

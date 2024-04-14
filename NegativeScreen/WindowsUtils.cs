@@ -14,24 +14,7 @@ namespace NegativeScreen
 			// https://stackoverflow.com/questions/1003073/how-to-check-whether-another-app-is-minimized-or-not
 			WINDOWPLACEMENT placement = new WINDOWPLACEMENT();
 			NativeMethods.GetWindowPlacement(windowHandle, ref placement);
-			return placement.showCmd == 2;
-		}
-
-		public static bool IsWindowVisible(IntPtr windowHandle, ref NativeMethods.windowRECT windowRect)
-		{
-			if (IsWindowMinimized(windowHandle))
-			{
-				return false;
-			}
-
-			if (!NativeMethods.GetWindowRect(windowHandle, ref windowRect) ||
-			    windowRect.right - windowRect.left == 0 ||
-			    windowRect.bottom - windowRect.top == 0)
-			{
-				return false;
-			}
-
-			return true;
+			return placement.showCmd == (int)ShowWindowStyles.SW_SHOWMINIMIZED;
 		}
 
 		public static string GetClassName(IntPtr hWnd)
