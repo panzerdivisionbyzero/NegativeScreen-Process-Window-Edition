@@ -1,4 +1,84 @@
-# NegativeScreen (Vivado Edition) #
+# NegativeScreen (Process Window Edition) #
+
+## Overview
+
+Inverts colors of specified process window or area within it. Intended for fully automated work with a specific app, controlled by config file, no GUI, no clicking, just using. The keyboard shortcuts should still work as before. To avoid making too many changes, I haven't removed much of the code that is no longer used.
+
+Based on [NegativeScreen (Vivado Edition)](https://github.com/HeatPhoenix/NegativeScreen-Vivado-Edition-)
+
+Huge thanks to Mlaily and HeatPhoenix for their work and sharing it on github!
+
+Examples:
+<details closed><summary>Without NegativeScreen (click)</summary>
+	
+![606_bright_02](https://github.com/panzerdivisionbyzero/NegativeScreen-Process-Window-Edition/assets/109442319/6eb38e94-91fd-4517-9feb-cdf6c2dc843c)
+
+</details>
+<details closed><summary>With NegativeScreen (click)</summary>
+	
+![606_dark](https://github.com/panzerdivisionbyzero/NegativeScreen-Process-Window-Edition/assets/109442319/53379acb-e56a-4bba-a0c3-c84341c39599)
+
+</details>
+
+## Changes from the "Vivado Edition"
+
+- parameterized target process name, so NegativeScreen can be used for almost any process instead of Vivado only
+- added colors inversion overlay area dependence on target window controls (it's possible to limit overlay area by specific controls of target window)
+- removed context menu - everthing is based on the configuration file parameters (explained further)
+- replaced multiple screens overlays by single overlay adjusted to target window (optionally to its controls)
+- restored Configuration and ConfigurationParser from the original repository and added some changes:
+  - extended by new parameters (for more information see auto-generated config file):
+    - DebugMode - shows logs console
+    - ExecuteProcessFromDefinedPath - determines if NegativeScreen should run executable file given in "ProcessPath" parameter
+    - FindProcessByPathInsteadName - determines if target process is defined by "ProcessPath" or "ProcessName" parameter
+    - ProcessPath - absolute or relative path to target process; not used when ExecuteProcessFromDefinedPath and FindProcessByPathInsteadName are set to false.
+    - ProcessPathParams - optional parameters for running executable specified in "ProcessPath"
+    - ProcessName - determines which processes will be found if FindProcessByPathInsteadName = false; not used when FindProcessByPathInsteadName = true
+    - MainWindowClassName - (optional) specifies which class (control) is the main window of target process
+    - WindowSidesLimits - (optional) custom parameters list, limiting colors inversion overlay area
+    - MainLoopPauseRefreshTime - milliseconds between cycles of waiting for target window to appear
+    - MainLoopRefreshTimeIncreaseStep - used for changing "MainLoopRefreshTime" in runtime by hotkeys
+	- WaitForWindowTime - maximum time in milliseconds for searching process and window for the fist time
+	- WaitForWindowTimeAfterClosed - maximum time in milliseconds for searching process and window again, after it was closed / terminated
+    - configuration file is associated by NegativeScreen executable name, with ".conf" extension instead ".exe"
+    - NegativeScreen tries to load configuration from working directory first, and if it fails, then tries to load it from `%AppData%\NegativeScreen` directory; if no configuration file was found, tries to create new configuration file (again: working directory first, AppData eventually) and opens it automatically in Notepad - in this case inverting overlay starts to work when Notepad is closed
+  - added new data structure for ConfigurationParser: WindowSidesLimits
+
+## How to use it
+
+1. On the first startup:
+   - NegativeScreen should create missing configuration file in working directory and open Notepad for editing
+   - if creating file in working directory fails, NegativeScreen will try to create config file in `%AppData%\NegativeScreen`
+   - after creating missing configuration file, NegativeScreen will open it with Notepad
+   - normal operating mode will start after closing Notepad with config
+2. Complete the configuration file (for more information see the configuration file contents):
+   - specify target process path or name
+   - specify if process should be executed by NegativeScreen ("ExecuteProcessFromDefinedPath"); some hints:
+     - executing by NegativeScreen is more convenient than executing manually or by additional batch file
+     - it's faster to find process started by NegativeScreen
+     - if you want to find already running process (instead executing it by NegativeScreen), searching by ProcessName should be quite efficient
+   - specify if process should be searched by ProcessPath or ProcessName ("FindProcessByPathInsteadName")
+   - fill ProcessPath or ProcessName value
+   - (optional) fill information about target window (I recommend using some other tool to look-up window controls classes, i.e. [WinInfo](https://www.softpedia.com/get/System/System-Info/WinInfo-JP.shtml)):
+     - MainWindowClassName
+     - WindowSidesLimits
+     <br>// you can modify the configuration file anytime later with any text editor you want.
+3. When your configuration file is ready:
+   - save and close configuration file
+   - NegativeScreen should begin normal operating mode (executing / finding process and create colors inversion overlay)
+   - NegativeScreen should close when target process is terminated
+4. Each subsequent use:
+   - if NegativeScreen is not configured to execute process directly: start the target process / app
+   - run NegativeScreen - if configuration file is correct, the colors inversion overlay should adjust automatically to specified window
+   - if overaly does not show or NegativeScreen closes immediately, you can set DebugMode to "true" and try to deduce what's going wrong
+   - NegativeScreen should close when target process is terminated
+
+Note: NegativeScreen is originally designed to work as the only one instance at the same time. It's possible to remove that limitation, but I haven't changed it so far, at least for now.
+
+---
+
+# Base Fork Description:
+## NegativeScreen (Vivado Edition) #
 
 ## Auto-Detects Vivado and darkens only Vivado! 
 
@@ -9,7 +89,7 @@ Many thanks to Mlaily the original dev of NegativeScreen for offering the source
 
 ***
 
-## Original Description
+# Original Description #
 
 NegativeScreen's main goal is to support your poor tearful eyes when enjoying the bright white interweb in a dark room.
 This task is joyfully achieved by inverting the colors of your screen.
