@@ -18,6 +18,9 @@
 
 //Edited by Zacharia Rudge
 
+//Forked and modified in 2024 by Pawel Witkowski
+//https://github.com/panzerdivisionbyzero
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

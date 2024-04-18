@@ -8,7 +8,7 @@ Based on [NegativeScreen (Vivado Edition)](https://github.com/HeatPhoenix/Negati
 
 Huge thanks to Mlaily and HeatPhoenix for their work and sharing it on github!
 
-Examples:
+Example:
 <details closed><summary>Without NegativeScreen (click)</summary>
 	
 ![606_bright_02](https://github.com/panzerdivisionbyzero/NegativeScreen-Process-Window-Edition/assets/109442319/6eb38e94-91fd-4517-9feb-cdf6c2dc843c)
@@ -38,8 +38,9 @@ Examples:
     - WindowSidesLimits - (optional) custom parameters list, limiting colors inversion overlay area
     - MainLoopPauseRefreshTime - milliseconds between cycles of waiting for target window to appear
     - MainLoopRefreshTimeIncreaseStep - used for changing "MainLoopRefreshTime" in runtime by hotkeys
-	- WaitForWindowTime - maximum time in milliseconds for searching process and window for the fist time
-	- WaitForWindowTimeAfterClosed - maximum time in milliseconds for searching process and window again, after it was closed / terminated
+    - WaitForWindowTime - maximum time in milliseconds for searching process and window for the fist time
+    - WaitForWindowTimeAfterClosed - maximum time in milliseconds for searching process and window again, after it was closed / terminated
+  - changed configuration file paths hierarchy and start-up behaviour:
     - configuration file is associated by NegativeScreen executable name, with ".conf" extension instead ".exe"
     - NegativeScreen tries to load configuration from working directory first, and if it fails, then tries to load it from `%AppData%\NegativeScreen` directory; if no configuration file was found, tries to create new configuration file (again: working directory first, AppData eventually) and opens it automatically in Notepad - in this case inverting overlay starts to work when Notepad is closed
   - added new data structure for ConfigurationParser: WindowSidesLimits
